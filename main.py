@@ -14,14 +14,13 @@ async def main():
         client = TgtgClient(email=config.email)
         credentials = client.get_credentials()
         with open('token', 'w') as file:
-            file.write(credentials)
+            file.write(str(credentials))
     else:
         with open('token', 'r') as file:
-            credentials = file.read()
+            credentials = json.loads(file.read().replace('\'', '"'))
 
-    data = json.loads(credentials.replace('\'', '"'))
 
-    client = TgtgClient(**data)
+    client = TgtgClient(**credentials)
 
     last = []
 
@@ -45,7 +44,7 @@ async def main():
                         name = "Panier anti-gaspi"
 
                     texts.append(f' - {amount} item(s) of "{name}" ({price:.2f}€) available at "{store}"')
-            elif item["item_id"] in last:
+            elif item["item"]["item_id"] in last:
                     amount = item["items_available"]
                     name = item["item"]["name"]
                     price = item["item"]["price_including_taxes"]["minor_units"]/(10**item["item"]["price_including_taxes"]["decimals"])
