@@ -21,6 +21,10 @@ async def main():
 
 
     client = TgtgClient(**credentials)
+    bot = telegram.Bot(config.telegram_token)
+
+    async with bot:
+        await bot.send_message(chat_id=config.telegram_id, text='tg² bot is watching!')
 
     last = []
 
@@ -38,7 +42,7 @@ async def main():
                     amount = item["items_available"]
                     name = item["item"]["name"]
                     price = item["item"]["price_including_taxes"]["minor_units"]/(10**item["item"]["price_including_taxes"]["decimals"])
-                    store = item["store"]["store_name"]
+                    store = item["store"]["store_name"] + ' (' + item["store"]["branch"] + ')'
 
                     if not name:
                         name = "Panier anti-gaspi"
@@ -57,7 +61,6 @@ async def main():
 
         
         if len(texts) > 1:
-            bot = telegram.Bot(config.telegram_token)
 
             print(f'\n{datetime.datetime.now()}: {len(texts)-1} new items available')
 
