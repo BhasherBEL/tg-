@@ -20,12 +20,15 @@ def load_creds():
 
     if not os.path.exists('/data/token'):
         client = TgtgClient(email=os.environ.get('TGTG_EMAIL'))
+        print('Waiting for credentials ...')
         credentials = client.get_credentials()
         with open('/data/token', 'w') as file:
             file.write(str(credentials))
+        print('Credentials stored in file')
     else:
         with open('/data/token', 'r') as file:
             credentials = json.loads(file.read().replace('\'', '"'))
+        print('Credentials loaded from file')
 
     client = TgtgClient(**credentials)
     bot = telegram.Bot(os.environ['TELEGRAM_TOKEN'])
@@ -85,6 +88,6 @@ async def main():
         time.sleep(60)
 
 if __name__ == '__main__':
-    check_env()
+    print('Check environ:', check_env())
     load_creds()
     asyncio.run(main())
