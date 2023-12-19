@@ -64,12 +64,12 @@ async def send_message(text):
                 'Content-Type': 'application/json',
             },
             auth=(os.environ.get('MATRIX_BASIC_AUTH_USER'), os.environ.get('MATRIX_BASIC_AUTH_PASS')),
-            json=json.encode(dic)
+            json=dic
         )
 
 
 async def main():
-    await send_message('tg² telegram_bot is watching!')
+    await send_message(['tg² telegram_bot is watching!'])
 
     last = []
 
