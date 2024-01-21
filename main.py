@@ -1,3 +1,4 @@
+import tgtg
 from tgtg import TgtgClient
 from tgtg.exceptions import TgtgAPIError
 import os
@@ -17,6 +18,10 @@ waiting_time_increase = 2
 randomness = 0.1
 
 interval = 60
+
+# Reduce frequency of polling to avoid rate limiting
+tgtg.POLLING_WAIT_TIME = 30
+tgtg.MAX_POLLING_TRIES = 10
 
 client = None
 telegram_bot = None
@@ -52,6 +57,30 @@ def check_env():
         return False
     return True
 
+def retry_on_api_error(message):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            global waiting_time
+
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except TgtgAPIError as e:
+                    print('ERROR: ', e)
+                    real_waiting_time = round(waiting_time + randomness * waiting_time * (2 * random.random() - 1))
+                    print(f'ls, retrying in {parse_duration(real_waiting_time)}')
+                    time.sleep(real_waiting_time)
+
+                    if waiting_time < waiting_time_limit:
+                        waiting_time *= waiting_time_increase
+
+        return wrapper
+    return decorator
+
+@retry_on_api_error('tg² failed to get credentials')
+def get_credentials():
+    return client.get_credentials()
+
 
 def load_creds():
     global client, telegram_bot
@@ -59,7 +88,7 @@ def load_creds():
     if not os.path.exists('/data/token'):
         client = TgtgClient(email=os.environ.get('TGTG_EMAIL'))
         print('Waiting for credentials ...')
-        credentials = client.get_credentials()
+        credentials = get_credentials()
         with open('/data/token', 'w') as file:
             file.write(str(credentials))
         print('Credentials stored in file')
@@ -160,6 +189,9 @@ async def main():
                 waiting_time *= waiting_time_increase
 
 if __name__ == '__main__':
-    print('Check environ:', check_env())
+    if not check_env():
+        print('Missing environment variables')
+        exit(1)
+
     load_creds()
     asyncio.run(main())
