@@ -10,9 +10,16 @@ import datetime
 import requests
 import random
 
+###################################
+#              UTILS              #
+###################################
 
-def get_env(name, default=None):
+def get_env(name, default=None, mandatory=False):
+    """Get an environment variable, with a default value and type casting."""
     content = os.environ.get(name, default)
+
+    if mandatory and content is None:
+        raise ValueError(f'Missing environment variable {name}')
 
     if type(default) == bool:
         return content.lower() in ('true', '1')
@@ -21,28 +28,9 @@ def get_env(name, default=None):
     if type(default) == float:
         return float(content)
     return content
-
-
-initial_waiting_time = get_env('INITIAL_WAITING_TIME', 60)
-waiting_time = initial_waiting_time
-waiting_time_limit = get_env('WAITING_TIME_LIMIT', 60 * 60 * 24)
-waiting_time_increase = get_env('WAITING_TIME_FACTOR', 2)
-
-randomness = get_env('RANDOMNESS', 0.1)
-
-interval = get_env('INTERVAL', 60)
-
-# Reduce frequency of polling to avoid rate limiting
-tgtg.POLLING_WAIT_TIME = get_env('LOGIN_POLLING_WAIT_TIME', 30)
-tgtg.MAX_POLLING_TRIES = get_env('LOGIN_MAX_POLLING_TRIES', 10)
-
-client = None
-telegram_bot = None
-removal_notification = get_env('REMOVAL_NOTIFICATION', False)
-
-TOKEN_PATH = get_env('TOKEN_PATH', '/data/token')
-
+    
 def parse_duration(seconds):
+    """Parse a duration in seconds to a human readable format."""
     seconds = int(seconds)
     minutes = seconds // 60
     seconds = seconds % 60
@@ -56,48 +44,96 @@ def parse_duration(seconds):
     else:
         return f'{seconds}s'
 
+def apply_randomness(value, randomness):
+    """Apply randomness to a value."""
+    return round(value + randomness * value * (2 * random.random() - 1))
 
-def check_env():
-    if get_env('TGTG_EMAIL') is None:
-        return False
-    if get_env('TELEGRAM') is None and os.environ.get('MATRIX') is None:
-        return False
-    if get_env('TELEGRAM') is not None and (os.environ.get('TELEGRAM_TOKEN') is None or os.environ.get('TELEGRAM_ID') is None):
-        return False
-    if get_env('MATRIX') is not None and os.environ.get('MATRIX_URL') is None:
-        return False
-    return True
+####################################
+#              CONFIG              #
+####################################
 
-def retry_on_api_error(message):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            global waiting_time
+TGTG_EMAIL = get_env('TGTG_EMAIL', mandatory=True)
+TELEGRAM_NOTIFICATIONS = get_env('TELEGRAM_NOTIFICATIONS', False)
+TELEGRAM_TOKEN = get_env('TELEGRAM_TOKEN', mandatory=TELEGRAM_NOTIFICATIONS)
+TELEGRAM_ID = get_env('TELEGRAM_ID', mandatory=TELEGRAM_NOTIFICATIONS)
+MATRIX_NOTIFICATIONS = get_env('MATRIX_NOTIFICATIONS', False)
+MATRIX_URL = get_env('MATRIX_URL', mandatory=MATRIX_NOTIFICATIONS)
+MATRIX_BASIC_AUTH_USER = get_env('MATRIX_BASIC_AUTH_USER', mandatory=MATRIX_NOTIFICATIONS)
+MATRIX_BASIC_AUTH_PASS = get_env('MATRIX_BASIC_AUTH_PASS', mandatory=MATRIX_NOTIFICATIONS)
 
-            while True:
-                try:
-                    return func(*args, **kwargs)
-                except TgtgAPIError as e:
-                    print('ERROR: ', e)
-                    real_waiting_time = round(waiting_time + randomness * waiting_time * (2 * random.random() - 1))
-                    print(f'ls, retrying in {parse_duration(real_waiting_time)}')
-                    time.sleep(real_waiting_time)
+INITIAL_WAITING_TIME = get_env('INITIAL_WAITING_TIME', 60)
+WAITING_TIME_LIMIT = get_env('WAITING_TIME_LIMIT', 60 * 60 * 24)
+WAITING_TIME_INCREASE = get_env('WAITING_TIME_FACTOR', 2)
+RANDOMNESS = get_env('RANDOMNESS', 0.1)
+INTERVAL = get_env('INTERVAL', 60)
 
-                    if waiting_time < waiting_time_limit:
-                        waiting_time *= waiting_time_increase
+REMOVAL_NOTIFICATIONS = get_env('REMOVAL_NOTIFICATIONS', False)
 
-        return wrapper
-    return decorator
+# Reduce frequency of polling to avoid rate limiting
+tgtg.POLLING_WAIT_TIME = get_env('LOGIN_POLLING_WAIT_TIME', 30)
+tgtg.MAX_POLLING_TRIES = get_env('LOGIN_MAX_POLLING_TRIES', 10)
 
-@retry_on_api_error('tg² failed to get credentials')
+TOKEN_PATH = get_env('TOKEN_PATH', '/data/token')
+
+####################################
+#               MAIN               #
+####################################
+
+waiting_time = INITIAL_WAITING_TIME
+
+tgtgClient = None
+telegram_bot = telegram.Bot(TELEGRAM_TOKEN) if TELEGRAM_NOTIFICATIONS else None
+
+
+async def send_message(text):
+    if TELEGRAM_NOTIFICATIONS:
+        async with telegram_bot:
+            await telegram_bot.send_message(
+                chat_id=TELEGRAM_ID,
+                text='\n'.join(['Too good to Go'] + text)
+            )
+        
+    if MATRIX_NOTIFICATIONS:
+        requests.post(
+            url=get_env('MATRIX_URL'),
+            headers={
+                'Content-Type': 'application/json',
+            },
+            auth=(MATRIX_BASIC_AUTH_USER, MATRIX_BASIC_AUTH_PASS),
+            json={
+            'title': 'Too Good to Go',
+            'list': text,
+        }
+        )
+
+
+def catch_api_error(e, message):
+    global waiting_time
+
+    print('ERROR: ', e)
+
+    real_waiting_time = apply_randomness(waiting_time, RANDOMNESS)
+    print(f'{message}, retrying in {parse_duration(real_waiting_time)}')
+
+    time.sleep(real_waiting_time)
+
+    waiting_time = min(waiting_time * WAITING_TIME_INCREASE, WAITING_TIME_LIMIT)
+
+
 def get_credentials():
-    return client.get_credentials()
+    while True:
+        try:
+            await send_message(['Open the link to login to tgtg'])
+            return tgtgClient.get_credentials()
+        except TgtgAPIError as e:
+            catch_api_error(e, 'tg² failed to get credentials')
 
 
 def load_creds():
-    global client, telegram_bot
+    global tgtgClient, telegram_bot
 
     if not os.path.exists(TOKEN_PATH):
-        client = TgtgClient(email=get_env('TGTG_EMAIL'))
+        tgtgClient = TgtgClient(email=TGTG_EMAIL)
         print('Waiting for credentials ...')
         credentials = get_credentials()
         with open(TOKEN_PATH, 'w') as file:
@@ -108,29 +144,7 @@ def load_creds():
             credentials = json.loads(file.read().replace('\'', '"'))
         print('Credentials loaded from file')
 
-    client = TgtgClient(**credentials)
-    if get_env('TELEGRAM').lower() == 'true':
-        telegram_bot = telegram.Bot(os.environ['TELEGRAM_TOKEN'])
-
-
-async def send_message(text):
-    if get_env('TELEGRAM').lower() == 'true':
-        async with telegram_bot:
-            await telegram_bot.send_message(chat_id=get_env('TELEGRAM_ID'), text='\n'.join(['Too good to Go'] + text))
-    if get_env('MATRIX').lower() == 'true':
-        dic = {
-            'title': 'Too Good to Go',
-            'list': text,
-        }
-
-        response = requests.post(
-            url=get_env('MATRIX_URL'),
-            headers={
-                'Content-Type': 'application/json',
-            },
-            auth=(get_env('MATRIX_BASIC_AUTH_USER'), os.environ.get('MATRIX_BASIC_AUTH_PASS')),
-            json=dic
-        )
+    tgtgClient = TgtgClient(**credentials)
 
 
 async def main():
@@ -140,7 +154,7 @@ async def main():
 
     while True:
         try:
-            items = client.get_items()
+            items = tgtgClient.get_items()
 
             texts = []
 
@@ -162,7 +176,7 @@ async def main():
                             name = "Panier anti-gaspi"
 
                         texts.append(f'{amount} x "{name}" ({price:.2f}€)')
-                elif removal_notification and item["item"]["item_id"] in last:
+                elif REMOVAL_NOTIFICATIONS and item["item"]["item_id"] in last:
                         amount = item["items_available"]
                         name = item["item"]["name"]
                         price = item["item"]["price_including_taxes"]["minor_units"]/(10**item["item"]["price_including_taxes"]["decimals"])
@@ -186,19 +200,13 @@ async def main():
                 print('-', end='', flush=True)
             
             last = next
-            real_interval = interval + randomness * interval * (2 * random.random() - 1)
-            time.sleep(interval)
+            real_interval = INTERVAL + RANDOMNESS * INTERVAL * (2 * random.random() - 1)
+            time.sleep(INTERVAL)
 
-            waiting_time = initial_waiting_time
+            waiting_time = INITIAL_WAITING_TIME
 
         except TgtgAPIError as e:
-            print(e)
-            real_waiting_time = round(waiting_time + randomness * waiting_time * (2 * random.random() - 1))
-            await send_message([f'tg² failed to fetch data, retrying in {parse_duration(real_waiting_time)}'])
-            time.sleep(real_waiting_time)
-
-            if waiting_time < waiting_time_limit:
-                waiting_time *= waiting_time_increase
+            catch_api_error(e, 'tg² failed to get items')
 
 if __name__ == '__main__':
     if not check_env():
