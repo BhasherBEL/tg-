@@ -10,26 +10,37 @@ import datetime
 import requests
 import random
 
-initial_waiting_time = 60
+
+def get_env(name, default=None):
+    content = os.environ.get(name, default)
+
+    if type(default) == bool:
+        return content.lower() in ('true', '1')
+    if type(default) == int:
+        return int(content)
+    if type(default) == float:
+        return float(content)
+    return content
+
+
+initial_waiting_time = get_env('INITIAL_WAITING_TIME', 60)
 waiting_time = initial_waiting_time
-waiting_time_limit = 60 * 60 * 24
-waiting_time_increase = 2
+waiting_time_limit = get_env('WAITING_TIME_LIMIT', 60 * 60 * 24)
+waiting_time_increase = get_env('WAITING_TIME_FACTOR', 2)
 
-randomness = 0.1
+randomness = get_env('RANDOMNESS', 0.1)
 
-interval = 60
+interval = get_env('INTERVAL', 60)
 
 # Reduce frequency of polling to avoid rate limiting
-tgtg.POLLING_WAIT_TIME = 30
-tgtg.MAX_POLLING_TRIES = 10
+tgtg.POLLING_WAIT_TIME = get_env('LOGIN_POLLING_WAIT_TIME', 30)
+tgtg.MAX_POLLING_TRIES = get_env('LOGIN_MAX_POLLING_TRIES', 10)
 
 client = None
 telegram_bot = None
-removal_notification = os.environ.get('REMOVAL_NOTIFICATION')
+removal_notification = get_env('REMOVAL_NOTIFICATION', False)
 
-if removal_notification is None:
-    removal_notification = False
-
+TOKEN_PATH = get_env('TOKEN_PATH', '/data/token')
 
 def parse_duration(seconds):
     seconds = int(seconds)
@@ -47,13 +58,13 @@ def parse_duration(seconds):
 
 
 def check_env():
-    if os.environ.get('TGTG_EMAIL') is None:
+    if get_env('TGTG_EMAIL') is None:
         return False
-    if os.environ.get('TELEGRAM') is None and os.environ.get('MATRIX') is None:
+    if get_env('TELEGRAM') is None and os.environ.get('MATRIX') is None:
         return False
-    if os.environ.get('TELEGRAM') is not None and (os.environ.get('TELEGRAM_TOKEN') is None or os.environ.get('TELEGRAM_ID') is None):
+    if get_env('TELEGRAM') is not None and (os.environ.get('TELEGRAM_TOKEN') is None or os.environ.get('TELEGRAM_ID') is None):
         return False
-    if os.environ.get('MATRIX') is not None and os.environ.get('MATRIX_URL') is None:
+    if get_env('MATRIX') is not None and os.environ.get('MATRIX_URL') is None:
         return False
     return True
 
@@ -85,39 +96,39 @@ def get_credentials():
 def load_creds():
     global client, telegram_bot
 
-    if not os.path.exists('/data/token'):
-        client = TgtgClient(email=os.environ.get('TGTG_EMAIL'))
+    if not os.path.exists(TOKEN_PATH):
+        client = TgtgClient(email=get_env('TGTG_EMAIL'))
         print('Waiting for credentials ...')
         credentials = get_credentials()
-        with open('/data/token', 'w') as file:
+        with open(TOKEN_PATH, 'w') as file:
             file.write(str(credentials))
         print('Credentials stored in file')
     else:
-        with open('/data/token', 'r') as file:
+        with open(TOKEN_PATH, 'r') as file:
             credentials = json.loads(file.read().replace('\'', '"'))
         print('Credentials loaded from file')
 
     client = TgtgClient(**credentials)
-    if os.environ.get('TELEGRAM') is not None:
+    if get_env('TELEGRAM').lower() == 'true':
         telegram_bot = telegram.Bot(os.environ['TELEGRAM_TOKEN'])
 
 
 async def send_message(text):
-    if os.environ.get('TELEGRAM') is not None:
+    if get_env('TELEGRAM').lower() == 'true':
         async with telegram_bot:
-            await telegram_bot.send_message(chat_id=os.environ.get('TELEGRAM_ID'), text='\n'.join(['Too good to Go'] + text))
-    if os.environ.get('MATRIX') is not None:
+            await telegram_bot.send_message(chat_id=get_env('TELEGRAM_ID'), text='\n'.join(['Too good to Go'] + text))
+    if get_env('MATRIX').lower() == 'true':
         dic = {
             'title': 'Too Good to Go',
             'list': text,
         }
 
         response = requests.post(
-            url=os.environ.get('MATRIX_URL'),
+            url=get_env('MATRIX_URL'),
             headers={
                 'Content-Type': 'application/json',
             },
-            auth=(os.environ.get('MATRIX_BASIC_AUTH_USER'), os.environ.get('MATRIX_BASIC_AUTH_PASS')),
+            auth=(get_env('MATRIX_BASIC_AUTH_USER'), os.environ.get('MATRIX_BASIC_AUTH_PASS')),
             json=dic
         )
 
@@ -175,7 +186,8 @@ async def main():
                 print('-', end='', flush=True)
             
             last = next
-            time.sleep(interval + randomness * interval * (2 * random.random() - 1))
+            real_interval = interval + randomness * interval * (2 * random.random() - 1)
+            time.sleep(interval)
 
             waiting_time = initial_waiting_time
 
