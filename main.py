@@ -120,7 +120,7 @@ def catch_api_error(e, message):
     waiting_time = min(waiting_time * WAITING_TIME_INCREASE, WAITING_TIME_LIMIT)
 
 
-def get_credentials():
+async def get_credentials():
     while True:
         try:
             await send_message(['Open the link to login to tgtg'])
@@ -129,13 +129,13 @@ def get_credentials():
             catch_api_error(e, 'tg² failed to get credentials')
 
 
-def load_creds():
+async def load_creds():
     global tgtgClient, telegram_bot
 
     if not os.path.exists(TOKEN_PATH):
         tgtgClient = TgtgClient(email=TGTG_EMAIL)
         print('Waiting for credentials ...')
-        credentials = get_credentials()
+        credentials = await get_credentials()
         with open(TOKEN_PATH, 'w') as file:
             file.write(str(credentials))
         print('Credentials stored in file')
@@ -148,6 +148,7 @@ def load_creds():
 
 
 async def main():
+    await load_creds()
     await send_message(['tg² telegram_bot is watching!'])
 
     last = []
@@ -213,5 +214,4 @@ if __name__ == '__main__':
         print('Missing environment variables')
         exit(1)
 
-    load_creds()
     asyncio.run(main())
