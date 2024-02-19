@@ -212,8 +212,4 @@ async def main():
             catch_api_error(e, 'tg² failed to get items')
 
 if __name__ == '__main__':
-    if not check_env():
-        print('Missing environment variables')
-        exit(1)
-
     asyncio.run(main())
