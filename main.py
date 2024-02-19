@@ -21,8 +21,10 @@ def get_env(name, default=None, mandatory=False):
     if mandatory and content is None:
         raise ValueError(f'Missing environment variable {name}')
 
-    if type(default) == bool:
+    if type(default) == str:
         return content.lower() in ('true', '1')
+    if type(default) == bool:
+        return content
     if type(default) == int:
         return int(content)
     if type(default) == float:
